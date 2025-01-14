@@ -1,0 +1,8 @@
+.venv/
+.env
+captured_image.png
+/output_audio.mp3
+books
+images
+initial_image
+split_images
