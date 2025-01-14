@@ -30,17 +30,24 @@ class Api:
         self.stop_camera = False
         self.stop_camBool = False
         # used when analyzing book
-        self.current_book = ""
+        self.current_book = "" 
         # used when reading book
         self.activeBook = ""
         self.page = 0
-
+        self.camNR = 0
+        self.stop_thread = False
+        self.camType = cv2.CAP_DSHOW # or cv2.CAP_ANY or cv2.CAP_DSHOW or cv2.CAP_MSMF
+    
     def set_window(self, window):
         self._window = window
+
+    def setThreadStop(self):
+        self.stop_thread = True
 
     def interruptsPy(self, allow):
         print(f"interrupts choice: {allow}")
         if (allow):
+            self.stop_thread = False
             self.py_cam2()
         self.activeBook = window.evaluate_js("fetchActiveBook()")
         print(f"this is the active book: {self.activeBook}")
@@ -58,6 +65,9 @@ class Api:
                 print("end of book")
                 window.evaluate_js(f"goToScreen('landingScreen')")
                 window.evaluate_js(f"stopAudio()")
+                window.evaluate_js(f"playAudio('Audio/Reading_5.mp3')")
+                self.stop_cam()
+                self.stop_thread = True
                 print("resetting page nr")
                 self.page = 0
                 return
@@ -68,6 +78,7 @@ class Api:
                 self.page -= 1
             else:
                 print("can't go back further")
+                window.evaluate_js(f"playAudio('Audio/Reading_4.mp3')")
                 return
         
         # Calculate the correct file to play
@@ -127,9 +138,14 @@ class Api:
         audio_path1 = self.runModels(splitImg_paths[0], self.current_book)
         # audio indication page 1 succesfull or not
         # if not function that clears all unnecesary files and calls newBook function
-
-        audio_path2 = self.runModels(splitImg_paths[1], self.current_book)
+        if(audio_path1 == None):
+           return
+        else:
+            audio_path2 = self.runModels(splitImg_paths[1], self.current_book)
         # audio indication page 2 succesfull or not
+
+        if(audio_path2 != None):
+            window.evaluate_js(f"playAudio('Audio/New_Book_2.mp3')")
 
         # indication code says move to next page and tap OR double tap to stop book
 
@@ -142,25 +158,25 @@ class Api:
         self.current_book = bookFolderName
         
         # starts the camera -> takes a picture -> splits picture in 2 -> stops the camera
-        self.start_camera()
-        img_path = self.capture_photo()
+        # self.start_camera()
+        # img_path = self.capture_photo()
 
-        # indication code audio
+        # # indication code audio
 
-        print(img_path)
-        self.stop_cam()
-        # REPLACE WITH img_path WHEN ACTUALLY TAKING PICTURES OF BOOKS
-        splitImg_paths = self.split_and_save_image(img_path)
+        # print(img_path)
+        # self.stop_cam()
+        # # REPLACE WITH img_path WHEN ACTUALLY TAKING PICTURES OF BOOKS
+        # splitImg_paths = self.split_and_save_image(img_path)
 
-        # feed pictures through audio generation
+        # # feed pictures through audio generation
         
-        audio_path1 = self.runModels(splitImg_paths[0], bookFolderName)
-        # audio indication page 1 succesfull or not
-        # if not function that clears all unnecesary files and calls newBook function
-        if(audio_path1 == None):
-           return
-        else:
-            audio_path2 = self.runModels(splitImg_paths[1], bookFolderName)
+        # audio_path1 = self.runModels(splitImg_paths[0], bookFolderName)
+        # # audio indication page 1 succesfull or not
+        # # if not function that clears all unnecesary files and calls newBook function
+        # if(audio_path1 == None):
+        #    return
+        # else:
+        #     audio_path2 = self.runModels(splitImg_paths[1], bookFolderName)
         # audio indication page 2 succesfull or not
 
         # indication code says move to next page and tap OR double tap to stop book
@@ -170,7 +186,7 @@ class Api:
 
     def start_camera(self):
         """Opens the camera and starts a video stream."""
-        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Use CAP_DSHOW for faster initialization on Windows
+        self.cap = cv2.VideoCapture(self.camNR, self.camType)  # Use CAP_DSHOW for faster initialization on Windows
         if not self.cap.isOpened():
             print("Error: Could not open camera.")
             return
@@ -254,7 +270,7 @@ class Api:
         mp_drawing = mp.solutions.drawing_utils
 
         # Start video capture
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(self.camNR, self.camType)
         if not self.cap.isOpened():
             print("Error: Could not open camera.")
             return
@@ -299,6 +315,38 @@ class Api:
         camera_thread = threading.Thread(target=process_camera, daemon=True)
         camera_thread.start()
     
+    def txtIntoAudio(self, txt):
+        print(f"Text turned into audio: {txt}")
+        if(txt.strip() == ""):
+            print("No text detected")
+            return 
+        else:
+            text2 = txt.strip()
+            print("text Detected")
+
+            client = Client("yaseenuom/text-script-to-audio", hf_token=huggingface_token)
+            result = client.predict(
+                    text=text2,
+                    voice="en-US-AvaMultilingualNeural - en-US (Female)",
+                    rate=0,
+                    pitch=0,
+                    api_name="/predict"
+            )
+            print(result[0])
+
+            audio_file_path = result[0]  # Local file path
+            current_folder = os.path.dirname(os.path.abspath(__file__))  # Get the script's folder
+
+            # Ensure a unique file name by appending a number if the file already exists
+            output_path = os.path.join(current_folder, "wordPopUpAudio/txt.mp3")
+
+            # Copy the file to the desired location
+            shutil.move(audio_file_path, output_path)
+
+            print(f"Audio saved to {output_path}")
+            return output_path
+            
+    
     def py_cam2(self):
         # Initialize EasyOCR Reader
         reader = easyocr.Reader(['en'], gpu=False)
@@ -309,7 +357,7 @@ class Api:
         mp_drawing = mp.solutions.drawing_utils
 
         # Capture video from the camera
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(self.camNR, self.camType)
 
         # Helper function to calculate the angle between two points
         def calculate_angle(point1, point2):
@@ -343,7 +391,7 @@ class Api:
             # Define the width and height of the cropped image
             crop_width = 400
             crop_height = 100
-            while cap.isOpened():
+            while cap.isOpened() and not self.stop_thread:
                 success, image = cap.read()
                 if not success:
                     break
@@ -387,6 +435,15 @@ class Api:
                                     if text_result:
                                         for (bbox, text, confidence) in text_result:
                                             print(f"Captured text: {text} (Confidence: {confidence:.2f})")
+                                            if confidence > 0.2:
+                                                wordPath = self.txtIntoAudio(text)
+                                                trimmed_path = os.path.join(os.path.basename(os.path.dirname(wordPath)), os.path.basename(wordPath))
+                                                trimmed_path = trimmed_path.replace("\\", "/")
+                                                print(f"Path to word audio: {trimmed_path}")
+                                                window.evaluate_js(f"setPopUpWordConfidence('{trimmed_path}')")
+                                                # Play a ding! sound
+                                                window.evaluate_js(f"playOverAudio('Audio/ding.mp3')")
+                                                window.evaluate_js(f"goToScreen('popUpWord')")
 
                         # Draw hand landmarks on the image
                         mp_drawing.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
@@ -399,7 +456,7 @@ class Api:
 
             cap.release()
             cv2.destroyAllWindows()
-        
+            
         camera_thread = threading.Thread(target=process_cam, daemon=True)
         camera_thread.start()
 
@@ -476,8 +533,10 @@ class Api:
 
         if(combined_text.strip() == ""):
             print("No text detected")
+            self.clear_folder(f"books/{bookFolderName}")
             os.rmdir(f"books/{bookFolderName}")
             window.evaluate_js(f"goToScreen('ErrorNewBook')")
+            window.evaluate_js(f"playAudio('Audio/New_Book_3.mp3')")
             return 
         else:
             text2 = combined_text.strip()
