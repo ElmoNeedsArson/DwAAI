@@ -35,9 +35,6 @@ class Api:
         self.activeBook = ""
         self.page = 0
 
-    def log_message(self, message):
-        print(f'console.log: {message}')  # Print to the terminal
-
     def set_window(self, window):
         self._window = window
 
@@ -125,7 +122,7 @@ class Api:
         print(img_path)
         self.stop_cam()
         # REPLACE WITH img_path WHEN ACTUALLY TAKING PICTURES OF BOOKS
-        splitImg_paths = self.split_and_save_image("debug.jpg")
+        splitImg_paths = self.split_and_save_image(img_path)
 
         audio_path1 = self.runModels(splitImg_paths[0], self.current_book)
         # audio indication page 1 succesfull or not
@@ -137,7 +134,7 @@ class Api:
         # indication code says move to next page and tap OR double tap to stop book
 
         # if it all goes well clear out all pictures from folders
-        self.clear_folder("split_images")
+        # self.clear_folder("split_images")
 
     def newBook(self):
         # Creates a new folder for this book
@@ -153,21 +150,23 @@ class Api:
         print(img_path)
         self.stop_cam()
         # REPLACE WITH img_path WHEN ACTUALLY TAKING PICTURES OF BOOKS
-        splitImg_paths = self.split_and_save_image("debug.jpg")
+        splitImg_paths = self.split_and_save_image(img_path)
 
         # feed pictures through audio generation
         
         audio_path1 = self.runModels(splitImg_paths[0], bookFolderName)
         # audio indication page 1 succesfull or not
         # if not function that clears all unnecesary files and calls newBook function
-
-        audio_path2 = self.runModels(splitImg_paths[1], bookFolderName)
+        if(audio_path1 == None):
+           return
+        else:
+            audio_path2 = self.runModels(splitImg_paths[1], bookFolderName)
         # audio indication page 2 succesfull or not
 
         # indication code says move to next page and tap OR double tap to stop book
 
         # if it all goes well clear out all pictures from folders
-        self.clear_folder("split_images")
+        # self.clear_folder("split_images")
 
     def start_camera(self):
         """Opens the camera and starts a video stream."""
@@ -455,49 +454,73 @@ class Api:
             return {'message': f"Error processing image: {str(e)}"}
     
     def runModels(self, img_path, bookFolderName):
-        print(img_path)
+        # print(img_path)
         textfromImg = pytesseract.image_to_string(img_path)
-        print(textfromImg)
+        
+        image = cv2.imread(img_path)  # Load the image from the file path
+        if image is None:
+            print("Error: Could not load image. Check the file path.")
+            return
+        
+        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        reader = easyocr.Reader(['en'], gpu=True)
+        text_result = reader.readtext(gray_image)
+        combined_text = ""  # Initialize an empty string to store the combined text
+        if text_result:
+            for (bbox, text, confidence) in text_result:
+                if confidence > 0.2:  # Only include text with confidence > 0.2
+                    combined_text += text + " "  # Add the text followed by a space
 
-        text2 = textfromImg.lower()
+        # Print the combined text
+        print(f"Combined text: {combined_text.strip()}")
 
-        print(text2)
+        if(combined_text.strip() == ""):
+            print("No text detected")
+            os.rmdir(f"books/{bookFolderName}")
+            window.evaluate_js(f"goToScreen('ErrorNewBook')")
+            return 
+        else:
+            text2 = combined_text.strip()
+            print("text Detected")
+            # text2 = textfromImg.lower()
 
-        client = Client("yaseenuom/text-script-to-audio", hf_token=huggingface_token)
-        result = client.predict(
-                text=text2,
-                voice="en-US-AvaMultilingualNeural - en-US (Female)",
-                rate=0,
-                pitch=0,
-                api_name="/predict"
-        )
-        print(result[0])
+            # print(text2)
 
-        audio_file_path = result[0]  # Local file path
-        current_folder = os.path.dirname(os.path.abspath(__file__))  # Get the script's folder
+            client = Client("yaseenuom/text-script-to-audio", hf_token=huggingface_token)
+            result = client.predict(
+                    text=text2,
+                    voice="en-US-AvaMultilingualNeural - en-US (Female)",
+                    rate=0,
+                    pitch=0,
+                    api_name="/predict"
+            )
+            print(result[0])
 
-        # Ensure a unique file name by appending a number if the file already exists
-        base_name = "output_audio"
-        ext = ".mp3"
-        output_path = os.path.join(current_folder, f"books/{bookFolderName}/{base_name}{ext}")
-        counter = 1
+            audio_file_path = result[0]  # Local file path
+            current_folder = os.path.dirname(os.path.abspath(__file__))  # Get the script's folder
 
-        while os.path.exists(output_path):
-            output_path = os.path.join(current_folder, f"books/{bookFolderName}/{base_name}_{counter}{ext}")
-            counter += 1
+            # Ensure a unique file name by appending a number if the file already exists
+            base_name = "output_audio"
+            ext = ".mp3"
+            output_path = os.path.join(current_folder, f"books/{bookFolderName}/{base_name}{ext}")
+            counter = 1
 
-        # Copy the file to the desired location
-        shutil.move(audio_file_path, output_path)
+            while os.path.exists(output_path):
+                output_path = os.path.join(current_folder, f"books/{bookFolderName}/{base_name}_{counter}{ext}")
+                counter += 1
 
-        print(f"Audio saved to {output_path}")
-        return output_path
-        # output_path = os.path.join(current_folder, "output_audio.mp3")  # Save as "output_audio.mp3"
+            # Copy the file to the desired location
+            shutil.move(audio_file_path, output_path)
 
-        # # Copy the file to the desired location
-        # shutil.copy(audio_file_path, output_path)
+            print(f"Audio saved to {output_path}")
+            return output_path
+            # output_path = os.path.join(current_folder, "output_audio.mp3")  # Save as "output_audio.mp3"
 
-        # print(f"Audio saved to {output_path}")
-        # return output_path
+            # # Copy the file to the desired location
+            # shutil.copy(audio_file_path, output_path)
+
+            # print(f"Audio saved to {output_path}")
+            # return output_path
 
     def save_picture(self, image_data):
             # Remove the base64 header from the data URL
