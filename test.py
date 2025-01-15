@@ -1,6 +1,7 @@
 import webview
 import base64
 import os
+os.environ["OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS"] = "0"
 import shutil
 import cv2
 import threading
@@ -13,6 +14,8 @@ from dotenv import load_dotenv
 import time
 import math
 import numpy as np
+from queue import Queue
+import google.generativeai as genai
 print("imported packages")
 
 load_dotenv()
@@ -20,8 +23,14 @@ load_dotenv()
 # Access the Hugging Face token
 huggingface_token = os.getenv('HUGGINGFACE_TOKEN')
 pyTesseract_path = os.getenv('PYTESSERACT_PATH')
+google_key = os.getenv('GENAI_KEY')
+genai.configure(api_key=google_key)
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 pytesseract.pytesseract.tesseract_cmd = pyTesseract_path
+
+# Initialize EasyOCR Reader
+reader = easyocr.Reader(['en'], gpu=False)
 
 class Api:
     def __init__(self):
@@ -34,9 +43,10 @@ class Api:
         # used when reading book
         self.activeBook = ""
         self.page = 0
-        self.camNR = 0
+        self.camNR = 1
         self.stop_thread = False
         self.camType = cv2.CAP_DSHOW # or cv2.CAP_ANY or cv2.CAP_DSHOW or cv2.CAP_MSMF
+        self.processing_queue = Queue()
     
     def set_window(self, window):
         self._window = window
@@ -133,6 +143,16 @@ class Api:
         print(img_path)
         self.stop_cam()
         # REPLACE WITH img_path WHEN ACTUALLY TAKING PICTURES OF BOOKS
+        image = cv2.imread(img_path)
+
+        # Convert to grayscale
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # Apply contrast enhancement using Histogram Equalization
+        enhanced = cv2.equalizeHist(gray)
+
+        # Save the processed image
+        cv2.imwrite(img_path, enhanced)
         splitImg_paths = self.split_and_save_image(img_path)
 
         audio_path1 = self.runModels(splitImg_paths[0], self.current_book)
@@ -345,11 +365,67 @@ class Api:
 
             print(f"Audio saved to {output_path}")
             return output_path
-            
+        
+    def process_image_worker(self):
+        """Worker thread for processing images and running OCR."""
+        while True:
+            cropped_image, image_index = self.processing_queue.get()
+            if cropped_image is None:
+                break
+
+            # Convert the cropped image to grayscale for better OCR
+            gray_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+
+            # Scale the image up
+            scale_percent = 200  # Increase size by 200%
+            width = int(gray_image.shape[1] * scale_percent / 100)
+            height = int(gray_image.shape[0] * scale_percent / 100)
+            scaled_image = cv2.resize(gray_image, (width, height), interpolation=cv2.INTER_CUBIC)
+
+            # Sharpen the image using a kernel
+            sharpen_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+            sharpened = cv2.filter2D(scaled_image, -1, sharpen_kernel)
+
+            # Enhance contrast using CLAHE
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(sharpened)
+
+            # Save the processed image
+            cv2.imwrite(f'word.jpg', enhanced)
+
+            # Run EasyOCR on the processed image
+            text_result = reader.readtext(enhanced)
+
+            # Extract and print recognized text
+            if text_result:
+                for (bbox, text, confidence) in text_result:
+                    print(f"Captured text: {text} (Confidence: {confidence:.2f})")
+                    if confidence > 0.64:
+                        print(f"Captured text: {text} (Confidence: {confidence:.2f})")
+                        def get_center_word(text):
+                            words = text.split()
+                            # Calculate the visual center based on character widths including spaces
+                            total_length = sum(len(word) + 1 for word in words) - 1  # -1 to remove the last extra space
+                            center_pos = total_length // 2
+
+                            # Find the word that covers the center position
+                            current_pos = 0
+                            for word in words:
+                                current_pos += len(word) + 1  # Add word length and one space
+                                if current_pos > center_pos:
+                                    return word
+                        center = get_center_word(text)
+                        print(f"Center word: {center}")
+                        wordPath = self.txtIntoAudio(text)
+                        trimmed_path = os.path.join(os.path.basename(os.path.dirname(wordPath)), os.path.basename(wordPath))
+                        trimmed_path = trimmed_path.replace("\\", "/")
+                        print(f"Path to word audio: {trimmed_path}")
+                        window.evaluate_js(f"setPopUpWordConfidence('{trimmed_path}')")
+                        # Play a ding! sound
+                        window.evaluate_js(f"playOverAudio('Audio/ding.mp3')")
+                        window.evaluate_js(f"goToScreen('popUpWord')")
     
     def py_cam2(self):
-        # Initialize EasyOCR Reader
-        reader = easyocr.Reader(['en'], gpu=False)
 
         # Initialize Mediapipe Hand Tracking
         mp_hands = mp.solutions.hands
@@ -389,8 +465,9 @@ class Api:
             last_capture_time = time.time()
 
             # Define the width and height of the cropped image
-            crop_width = 400
-            crop_height = 100
+            crop_width = 60
+            crop_height = 30
+            image_index = 0
             while cap.isOpened() and not self.stop_thread:
                 success, image = cap.read()
                 if not success:
@@ -412,38 +489,62 @@ class Api:
                             x, y = index_finger_pos
 
                             # Calculate rectangle coordinates
-                            top_left = (max(0, x - crop_width // 2), max(0, y - crop_height))
-                            bottom_right = (min(w, x + crop_width // 2), min(h, y))
+                            vertical_offset = 10
+                            top_left = (max(0, x - crop_width // 2), max(0, y - crop_height - vertical_offset))
+                            bottom_right = (min(w, x + crop_width // 2), min(h, y - vertical_offset))
 
                             # Draw the green rectangle
                             cv2.rectangle(image, top_left, bottom_right, (0, 255, 0), 2)
 
                             current_time = time.time()
                             if current_time - last_capture_time >= capture_interval:
+                                print("5 seconds passed, running again")
                                 last_capture_time = current_time
 
                                 cropped_image = image[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
-
                                 if cropped_image.size != 0:
-                                    # Convert the cropped image to grayscale for better OCR
-                                    gray_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+                                    # Add the image to the processing queue
+                                    self.processing_queue.put((cropped_image, image_index))
+                                    image_index += 1
 
-                                    # Run EasyOCR on the cropped image
-                                    text_result = reader.readtext(gray_image)
+                                # cropped_image = image[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
 
-                                    # Extract and print recognized text
-                                    if text_result:
-                                        for (bbox, text, confidence) in text_result:
-                                            print(f"Captured text: {text} (Confidence: {confidence:.2f})")
-                                            if confidence > 0.2:
-                                                wordPath = self.txtIntoAudio(text)
-                                                trimmed_path = os.path.join(os.path.basename(os.path.dirname(wordPath)), os.path.basename(wordPath))
-                                                trimmed_path = trimmed_path.replace("\\", "/")
-                                                print(f"Path to word audio: {trimmed_path}")
-                                                window.evaluate_js(f"setPopUpWordConfidence('{trimmed_path}')")
-                                                # Play a ding! sound
-                                                window.evaluate_js(f"playOverAudio('Audio/ding.mp3')")
-                                                window.evaluate_js(f"goToScreen('popUpWord')")
+                                # if cropped_image.size != 0:
+                                #     # Convert the cropped image to grayscale for better OCR
+                                #     gray_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+                                #     # STEP 1: Scale the image up
+                                #     scale_percent = 200  # Increase size by 200% (adjust as needed)
+                                #     width = int(image.shape[1] * scale_percent / 100)
+                                #     height = int(image.shape[0] * scale_percent / 100)
+                                #     scaled_image = cv2.resize(gray_image, (width, height), interpolation=cv2.INTER_CUBIC)
+
+                                #     # STEP 2: Sharpen the image using a kernel
+                                #     # Sharpening kernel
+                                #     sharpen_kernel = np.array([[-1, -1, -1],
+                                #                             [-1, 9, -1],
+                                #                             [-1, -1, -1]])
+                                #     sharpened = cv2.filter2D(scaled_image, -1, sharpen_kernel)
+
+                                #     # STEP 3: Enhance contrast using CLAHE (Contrast Limited Adaptive Histogram Equalization)
+                                #     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                                #     enhanced = clahe.apply(sharpened)
+                                #     cv2.imwrite('word.jpg', enhanced)
+                                #     # Run EasyOCR on the cropped image
+                                #     text_result = reader.readtext(enhanced)
+
+                                #     # Extract and print recognized text
+                                #     if text_result:
+                                #         for (bbox, text, confidence) in text_result:
+                                #             print(f"Captured text: {text} (Confidence: {confidence:.2f})")
+                                #             # if confidence > 0.2:
+                                #                 # wordPath = self.txtIntoAudio(text)
+                                #                 # trimmed_path = os.path.join(os.path.basename(os.path.dirname(wordPath)), os.path.basename(wordPath))
+                                #                 # trimmed_path = trimmed_path.replace("\\", "/")
+                                #                 # print(f"Path to word audio: {trimmed_path}")
+                                #                 # window.evaluate_js(f"setPopUpWordConfidence('{trimmed_path}')")
+                                #                 # # Play a ding! sound
+                                #                 # window.evaluate_js(f"playOverAudio('Audio/ding.mp3')")
+                                #                 # window.evaluate_js(f"goToScreen('popUpWord')")
 
                         # Draw hand landmarks on the image
                         mp_drawing.draw_landmarks(image, hand_landmarks, mp_hands.HAND_CONNECTIONS)
@@ -456,6 +557,11 @@ class Api:
 
             cap.release()
             cv2.destroyAllWindows()
+
+            self.processing_queue.put((None, None))
+
+        worker_thread = threading.Thread(target=self.process_image_worker, daemon=True)
+        worker_thread.start()
             
         camera_thread = threading.Thread(target=process_cam, daemon=True)
         camera_thread.start()
@@ -510,10 +616,7 @@ class Api:
             window.evaluate_js('displayError();')
             return {'message': f"Error processing image: {str(e)}"}
     
-    def runModels(self, img_path, bookFolderName):
-        # print(img_path)
-        textfromImg = pytesseract.image_to_string(img_path)
-        
+    def runModels(self, img_path, bookFolderName):       
         image = cv2.imread(img_path)  # Load the image from the file path
         if image is None:
             print("Error: Could not load image. Check the file path.")
@@ -522,6 +625,7 @@ class Api:
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         reader = easyocr.Reader(['en'], gpu=True)
         text_result = reader.readtext(gray_image)
+        # text_result = pytesseract.image_to_string(gray_image)
         combined_text = ""  # Initialize an empty string to store the combined text
         if text_result:
             for (bbox, text, confidence) in text_result:
@@ -541,13 +645,32 @@ class Api:
         else:
             text2 = combined_text.strip()
             print("text Detected")
+
+            # response = model.generate_content("Explain how AI works")
+            response = model.generate_content(f"I will give you a sentence with errors in some of the letters: '{text2}'. Please correct the errors and provide the intended sentence. Only reply with the corrected sentence")
+            # print(response)
+
+            if(response == None):
+                print("response is none")
+                self.clear_folder(f"books/{bookFolderName}")
+                os.rmdir(f"books/{bookFolderName}")
+                window.evaluate_js(f"goToScreen('ErrorNewBook')")
+                window.evaluate_js(f"playAudio('Audio/New_Book_3.mp3')")
+                return
+            elif(len(response.text)>500):
+                print("Corrected message was too long")
+                self.clear_folder(f"books/{bookFolderName}")
+                os.rmdir(f"books/{bookFolderName}")
+                window.evaluate_js(f"goToScreen('ErrorNewBook')")
+                window.evaluate_js(f"playAudio('Audio/New_Book_3.mp3')")
+                return
             # text2 = textfromImg.lower()
 
             # print(text2)
 
             client = Client("yaseenuom/text-script-to-audio", hf_token=huggingface_token)
             result = client.predict(
-                    text=text2,
+                    text=response.text,
                     voice="en-US-AvaMultilingualNeural - en-US (Female)",
                     rate=0,
                     pitch=0,
