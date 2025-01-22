@@ -136,7 +136,7 @@ bookList.addEventListener("click", () => {
 
     if (timeSinceLastClick < 300) {
         console.log("double click -> Selected book: " + activeBook);
-        playAudio('Audio/Reading_1.mp3')
+        playAudio('Audio/Interactive_reading_1.mp3')
         goToScreen('interruptChoice')
         // Double-click code here
     } else {
