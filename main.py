@@ -1,3 +1,5 @@
+__version__ = "1.0"
+
 import webview
 import base64
 import os
@@ -6,7 +8,6 @@ import shutil
 import cv2
 import threading
 import mediapipe as mp
-from io import BytesIO
 from gradio_client import Client
 import pytesseract
 import easyocr
@@ -20,13 +21,16 @@ print("imported packages")
 
 load_dotenv()
 
-# Access the Hugging Face token
+# Access the Hugging Face token and the pyTesseract path
 huggingface_token = os.getenv('HUGGINGFACE_TOKEN')
 pyTesseract_path = os.getenv('PYTESSERACT_PATH')
+
+# Establishing the google api
 google_key = os.getenv('GENAI_KEY')
 genai.configure(api_key=google_key)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
+# Initialize the pyTesseract module
 pytesseract.pytesseract.tesseract_cmd = pyTesseract_path
 
 # Initialize EasyOCR Reader
@@ -40,9 +44,11 @@ class Api:
         self.stop_camBool = False
         # used when analyzing book
         self.current_book = "" 
+        self.analyze_page = 0
         # used when reading book
         self.activeBook = ""
-        self.page = 0
+        self.page = 1
+        self.pageIndex = 0
         self.camNR = 1
         self.stop_thread = False
         self.camType = cv2.CAP_DSHOW # or cv2.CAP_ANY or cv2.CAP_DSHOW or cv2.CAP_MSMF
@@ -63,41 +69,96 @@ class Api:
         print(f"this is the active book: {self.activeBook}")
         window.evaluate_js(f"goToScreen('bookStart')")
 
+    def playPreviousAudio(self):
+        folder_path2 = os.path.join(os.path.dirname(__file__), "books", self.activeBook)
+        folder_path3 = os.path.join(folder_path2, f"page{self.page}")
+
+        files = [f for f in os.listdir(folder_path3) if os.path.isfile(os.path.join(folder_path3, f))]
+        if self.pageIndex > 1:
+            self.pageIndex -= 2  # Go to the previous audio file
+            print(f"Playing previous audio on page {self.page}, index {self.pageIndex}")
+            self.startListening(next=True)
+        elif self.page > 1:
+            self.page -= 1
+            prev_folder_path = os.path.join(folder_path2, f"page{self.page}")
+            prev_files = [f for f in os.listdir(prev_folder_path) if os.path.isfile(os.path.join(prev_folder_path, f))]
+            if prev_files:
+                self.pageIndex = len(prev_files) - 1
+                print(f"Playing last audio on page {self.page}, index {self.pageIndex}")
+                self.startListening(next=True)
+        else:
+            print("No previous audio to play")
+
     def startListening(self, next):
         # play audio
         folder_path1 = os.path.join(os.path.dirname(__file__), "books")
         folder_path2 = os.path.join(folder_path1, self.activeBook)
-        files = [f for f in os.listdir(folder_path2) if os.path.isfile(os.path.join(folder_path2, f))]
+        folder_path3 = os.path.join(folder_path2, f"page{self.page}")
+
+        files = [f for f in os.listdir(folder_path3) if os.path.isfile(os.path.join(folder_path3, f))]
+        directories = [d for d in os.listdir(folder_path2) if os.path.isdir(os.path.join(folder_path2, d))]
+        nrOfAudioFilesPage = len(files)
         print(files)
-        
+        print(f"Nr: {nrOfAudioFilesPage}")
+        print(f"pagindex: {self.pageIndex}")
+
+        print(f"Page: {self.page}")
+        print(f"Nr_Dir: {len(directories)}")
+
+        def playCorrectAudio():
+            # Calculate the correct file to play
+            fullAudioPath = os.path.join("books", self.activeBook, f"page{self.page}", files[self.pageIndex]).replace("\\", "/")
+            print(fullAudioPath)
+            
+            # Play the audio file
+            window.evaluate_js(f'playAudio("{fullAudioPath}")')
+
         if next:
-            if self.page >= len(files):
-                print("end of book")
-                window.evaluate_js(f"goToScreen('landingScreen')")
-                window.evaluate_js(f"stopAudio()")
-                window.evaluate_js(f"playAudio('Audio/Reading_5.mp3')")
-                self.stop_cam()
-                self.stop_thread = True
-                print("resetting page nr")
-                self.page = 0
-                return
-            else:
+            # user clicks the next button -> navigating to next page or ending book
+            if self.pageIndex < nrOfAudioFilesPage:
+                print("play audio")
+                print(f"Play page: {self.page} index: {self.pageIndex}")
+                playCorrectAudio()
+                self.pageIndex += 1
+                # play audio of index and page
+            elif self.pageIndex >= nrOfAudioFilesPage:
+                print("played all audio files from this page")
                 self.page += 1
+                if self.page > len(directories):
+                    print("book finished")
+                    window.evaluate_js(f"goToScreen('landingScreen')")
+                    window.evaluate_js(f"stopAudio()")
+                    window.evaluate_js(f"playAudio('Audio/BookFinished_1.mp3')")
+                    self.stop_cam()
+                    self.stop_thread = True
+                    self.page = 1
+                    self.pageIndex = 0
+                else:
+                    self.pageIndex = 0
+                    print(f"Play page: {self.page} index: {self.pageIndex}")
+                    playCorrectAudio()
+                    self.pageIndex += 1
+                    # play audio of index and page
         else:
-            if self.page > 1:
-                self.page -= 1
+            print("user wants to turn back")
+            # play current file again
+            if self.pageIndex > 0:
+                self.pageIndex -= 1
+                print(f"Play page: {self.page} index: {self.pageIndex}")
+                playCorrectAudio()
+                self.pageIndex += 1
             else:
-                print("can't go back further")
-                window.evaluate_js(f"playAudio('Audio/Reading_4.mp3')")
-                return
-        
-        # Calculate the correct file to play
-        pageFromArray = self.page - 1
-        fullAudioPath = os.path.join("books", self.activeBook, files[pageFromArray]).replace("\\", "/")
-        print(fullAudioPath)
-        
-        # Play the audio file
-        window.evaluate_js(f'playAudio("{fullAudioPath}")')
+                if self.page > 1:
+                    self.page -= 1
+                    folder_path3 = os.path.join(folder_path2, f"page{self.page}")
+                    files = [f for f in os.listdir(folder_path3) if os.path.isfile(os.path.join(folder_path3, f))]
+                    self.pageIndex = len(files)-1
+                    print(f"Play page: {self.page} index: {self.pageIndex}")
+                    playCorrectAudio()
+                    self.pageIndex += 0
+                    self.page += 1
+                else:
+                    print("Cant go back further")
 
     def get_folders_in_folder(self, subfolder_name):
         print("folder in folder function")
@@ -155,17 +216,22 @@ class Api:
         cv2.imwrite(img_path, enhanced)
         splitImg_paths = self.split_and_save_image(img_path)
 
-        audio_path1 = self.runModels(splitImg_paths[0], self.current_book)
+        self.analyze_page = self.analyze_page + 1
+        audio_path1 = self.runModels(splitImg_paths[0], self.current_book, self.analyze_page)
+        window.evaluate_js(f"playAudio('Audio/Scanning_1.mp3')")
+
         # audio indication page 1 succesfull or not
         # if not function that clears all unnecesary files and calls newBook function
         if(audio_path1 == None):
-           return
+           return # better error handle
         else:
-            audio_path2 = self.runModels(splitImg_paths[1], self.current_book)
+            self.analyze_page = self.analyze_page + 1
+            audio_path2 = self.runModels(splitImg_paths[1], self.current_book, self.analyze_page)
         # audio indication page 2 succesfull or not
-
-        if(audio_path2 != None):
-            window.evaluate_js(f"playAudio('Audio/New_Book_2.mp3')")
+        if(audio_path2 == None):
+           return # better error handle
+        elif(audio_path2 != None):
+            window.evaluate_js(f"playAudio('Audio/SucessfulScan_1.mp3')")
 
         # indication code says move to next page and tap OR double tap to stop book
 
@@ -173,36 +239,10 @@ class Api:
         # self.clear_folder("split_images")
 
     def newBook(self):
+        self.analyze_page = 0
         # Creates a new folder for this book
         bookFolderName = self.create_folder("Book")
         self.current_book = bookFolderName
-        
-        # starts the camera -> takes a picture -> splits picture in 2 -> stops the camera
-        # self.start_camera()
-        # img_path = self.capture_photo()
-
-        # # indication code audio
-
-        # print(img_path)
-        # self.stop_cam()
-        # # REPLACE WITH img_path WHEN ACTUALLY TAKING PICTURES OF BOOKS
-        # splitImg_paths = self.split_and_save_image(img_path)
-
-        # # feed pictures through audio generation
-        
-        # audio_path1 = self.runModels(splitImg_paths[0], bookFolderName)
-        # # audio indication page 1 succesfull or not
-        # # if not function that clears all unnecesary files and calls newBook function
-        # if(audio_path1 == None):
-        #    return
-        # else:
-        #     audio_path2 = self.runModels(splitImg_paths[1], bookFolderName)
-        # audio indication page 2 succesfull or not
-
-        # indication code says move to next page and tap OR double tap to stop book
-
-        # if it all goes well clear out all pictures from folders
-        # self.clear_folder("split_images")
 
     def start_camera(self):
         """Opens the camera and starts a video stream."""
@@ -358,6 +398,7 @@ class Api:
             current_folder = os.path.dirname(os.path.abspath(__file__))  # Get the script's folder
 
             # Ensure a unique file name by appending a number if the file already exists
+            os.remove("wordPopUpAudio/txt.mp3")
             output_path = os.path.join(current_folder, "wordPopUpAudio/txt.mp3")
 
             # Copy the file to the desired location
@@ -587,36 +628,36 @@ class Api:
         except Exception as e:
             print(f"Error clearing folder: {e}")
     
-    def process_image(self, base64_image):
-        window = webview.windows[0]
-        try:
-            # Remove the metadata prefix (e.g., "data:image/png;base64,")
-            image_data = base64_image.split(',')[1]
+    # def process_image(self, base64_image):
+    #     window = webview.windows[0]
+    #     try:
+    #         # Remove the metadata prefix (e.g., "data:image/png;base64,")
+    #         image_data = base64_image.split(',')[1]
 
-            # Convert base64 string back to binary data
-            image_binary = base64.b64decode(image_data)
+    #         # Convert base64 string back to binary data
+    #         image_binary = base64.b64decode(image_data)
 
-            # Save the image to a file (for example, as 'uploaded_image.png')
-            self.clear_folder('images')
-            img_folder = "images/"
-            img_path = img_folder + "analyze.png"
-            with open(img_path, 'wb') as img_file:
-                img_file.write(image_binary)
+    #         # Save the image to a file (for example, as 'uploaded_image.png')
+    #         self.clear_folder('images')
+    #         img_folder = "images/"
+    #         img_path = img_folder + "analyze.png"
+    #         with open(img_path, 'wb') as img_file:
+    #             img_file.write(image_binary)
 
-            audio_path = self.runModels(img_path)
+    #         audio_path = self.runModels(img_path)
 
-            # Trigger the JS function to play audio after processing the image
-            # window = webview.windows[0]  # Get the window reference
-            window.evaluate_js(f'playAudio("{audio_path}");')  # Call the playAudio function in JS
+    #         # Trigger the JS function to play audio after processing the image
+    #         # window = webview.windows[0]  # Get the window reference
+    #         window.evaluate_js(f'playAudio("{audio_path}");')  # Call the playAudio function in JS
 
-            print(img_path)
-            return {'message': f"Image successfully saved as {img_path}"}
-        except Exception as e:
-            print(f"Error processing image: {e}")
-            window.evaluate_js('displayError();')
-            return {'message': f"Error processing image: {str(e)}"}
+    #         print(img_path)
+    #         return {'message': f"Image successfully saved as {img_path}"}
+    #     except Exception as e:
+    #         print(f"Error processing image: {e}")
+    #         window.evaluate_js('displayError();')
+    #         return {'message': f"Error processing image: {str(e)}"}
     
-    def runModels(self, img_path, bookFolderName):       
+    def runModels(self, img_path, bookFolderName, pageNR):       
         image = cv2.imread(img_path)  # Load the image from the file path
         if image is None:
             print("Error: Could not load image. Check the file path.")
@@ -647,8 +688,30 @@ class Api:
             print("text Detected")
 
             # response = model.generate_content("Explain how AI works")
-            response = model.generate_content(f"I will give you a sentence with errors in some of the letters: '{text2}'. Please correct the errors and provide the intended sentence. Only reply with the corrected sentence")
+            response = model.generate_content(
+                f"""
+                Firstly:
+                - You will be given a text with errors in some letters: '{text2}'.
+                - Correct all errors and provide the intended text as truthfully as possible.
+                - Only reply with the fully corrected text — do not repeat the input or include any additional comments.
+                
+                Secondly:
+                - Take this corrected text and break it into small sentence parts, separating each part with a '|' character.
+                - Splits should occur at natural pause points such as periods ('.'), commas (','), or appropriate places in long sentences where a speaker would naturally pause.
+                - Use logical splits that maintain normal sentence flow — meaning it should still sound natural if spoken aloud, with a '|' marking where a brief pause would be.
+                
+                Important:
+                - Only reply with the final output, formatted with '|' as described.
+                - Do not repeat or duplicate text from the input.
+                - Do not include any extra words or explanations — only the corrected and split text is allowed in the output.
+                """
+            )
             # print(response)
+            print(response.text)
+            # responseArr = response.text.split('|')
+            # responseArr = list(filter(None, response.text.split('|')))
+            responseArr = [item for item in response.text.strip().split('|') if item.strip()]
+            print(responseArr)
 
             if(response == None):
                 print("response is none")
@@ -667,42 +730,56 @@ class Api:
             # text2 = textfromImg.lower()
 
             # print(text2)
-
-            client = Client("yaseenuom/text-script-to-audio", hf_token=huggingface_token)
-            result = client.predict(
-                    text=response.text,
-                    voice="en-US-AvaMultilingualNeural - en-US (Female)",
-                    rate=0,
-                    pitch=0,
-                    api_name="/predict"
-            )
-            print(result[0])
-
-            audio_file_path = result[0]  # Local file path
+            # create folder for page
+            def create_page_folder(bookname, nrvariable):
+                # Define the path to the book folder
+                book_path = os.path.join("books", bookname)
+                # Define the path for the page folder
+                page_folder_name = f"page{nrvariable}"
+                page_path = os.path.join(book_path, page_folder_name)
+                
+                # Check if the book folder exists and the page folder does not
+                if os.path.exists(book_path) and not os.path.exists(page_path):
+                    os.makedirs(page_path)  # Create the page folder
+                    print(f"Folder '{page_folder_name}' created in '{book_path}'.")
+                    return page_folder_name
+                else:
+                    print(f"Book folder does not exist or page folder '{page_folder_name}' already exists.")
+            
+            pageFolder = create_page_folder(bookFolderName,pageNR)
             current_folder = os.path.dirname(os.path.abspath(__file__))  # Get the script's folder
 
-            # Ensure a unique file name by appending a number if the file already exists
-            base_name = "output_audio"
-            ext = ".mp3"
-            output_path = os.path.join(current_folder, f"books/{bookFolderName}/{base_name}{ext}")
-            counter = 1
+            for sentence in responseArr:
+                client = Client("yaseenuom/text-script-to-audio", hf_token=huggingface_token)
+                result = client.predict(
+                        text=sentence,
+                        voice="en-US-AvaMultilingualNeural - en-US (Female)",
+                        rate=0,
+                        pitch=0,
+                        api_name="/predict"
+                )
+                print(result[0])
 
-            while os.path.exists(output_path):
-                output_path = os.path.join(current_folder, f"books/{bookFolderName}/{base_name}_{counter}{ext}")
-                counter += 1
+                audio_file_path = result[0]  # Local file path
 
-            # Copy the file to the desired location
-            shutil.move(audio_file_path, output_path)
+                # Ensure a unique file name by appending a number if the file already exists
+                base_name = "output_audio"
+                ext = ".mp3"
+                output_path = os.path.join(current_folder, f"books/{bookFolderName}/{pageFolder}/{base_name}{ext}")
+                counter = 1
 
-            print(f"Audio saved to {output_path}")
-            return output_path
-            # output_path = os.path.join(current_folder, "output_audio.mp3")  # Save as "output_audio.mp3"
+                while os.path.exists(output_path):
+                    output_path = os.path.join(current_folder, f"books/{bookFolderName}/{pageFolder}/{base_name}_{counter}{ext}")
+                    counter += 1
 
-            # # Copy the file to the desired location
-            # shutil.copy(audio_file_path, output_path)
+                # Copy the file to the desired location
+                shutil.move(audio_file_path, output_path)
 
-            # print(f"Audio saved to {output_path}")
-            # return output_path
+                print(f"Audio saved to {output_path}")
+            
+            page_path = os.path.join(current_folder, f"books/{bookFolderName}/{pageFolder}")
+            if os.path.exists(page_path):
+                return page_path
 
     def save_picture(self, image_data):
             # Remove the base64 header from the data URL

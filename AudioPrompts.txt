@@ -1,0 +1,28 @@
+Landing.mp3:
+"Homepage. Tap top part of your screen to scan new book. Tap bottom part of your screen to access your library"
+
+"Book Scanning Page. Open the physical book in front of you on the first page. Tap the screen to start the scan"
+
+"Starting scan"
+
+"Scanning..."
+
+"The scan was succesfull. Flip the page and tap for the next scan. You can also double tap to end the bookscan"
+
+"The new book has been saved succesfully, you can find it in your library. You can now tap the bottom to access your library or tap the top to scan another book"
+
+"Library. Tap once to hear a book title. Tap twice to select the book"
+
+"Book selected. Tap top part of your screen for interactive Reading mode. Tap bottom part to disgard"
+
+"Interactive mode enabled. The application will track fingers and notify when a specific word is pointed at. You will hear a small 'ding'."
+
+"Loading book files"
+
+"Book is loaded!"
+
+"Tap right side of screen to play the next audiofile. Or tap on the left side to play the current audio once more. If you want to move back an audio file you can double tap the left side"
+
+"The book is finished. You can now tap the bottom to access your library, or the top to scan another book"
+
+"Ending reading activity Early. You can now tap the bottom to access your library, or the top to scan another book"

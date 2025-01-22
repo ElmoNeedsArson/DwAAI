@@ -1,0 +1,42 @@
+Repeatability of latest instruction
+Boek library niet direct op boek 1 landing
+
+More click feedback
+- are you sure you want to do this
+- confirm i clicked this button
+- when loading indicate it
+
+Haptic feedback?
+
+Simpler audio cues
+More audio cues
+
+Being able to replay instructions 
+and text
+
+when saving pages remind user how to end book
+
+Instructions shouldnt be too long
+
+Better explain interruption feature
+- rename?
+- explain notification sound better
+
+to be implemented:
+- reading_1.mp3 -> helena moet nog sturen
+
+- loadingbook -> somewhere in library
+- bookloaded -> somewhere in library
+
+Implemented audiofiles:
+- sucessfulscan_1.mp3
+- savedbook_1.mp3
+- libraryintro_1
+- interactivemode
+- homepage_1
+- endingreadingearly_1
+- bookscanningpage_1
+- bookfinished
+- startingscan_1.mp3
+- scanning
+- playAudio_1 -> in library links en rechts knopje

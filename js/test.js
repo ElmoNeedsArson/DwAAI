@@ -2,7 +2,7 @@ console.log("Test js file")
 window.onload = function () {
     // Delay execution by 2 seconds
     setTimeout(() => {
-        playAudio('Audio/landing.mp3')
+        playAudio('Audio/Homepage_1.mp3')
     }, 2000);
 };
 
@@ -55,8 +55,8 @@ function playWord() {
 
 function interrupts(allow) {
     pywebview.api.interruptsPy(allow)
-    if(allow){
-        playAudio('Audio/Reading_2.mp3','Audio/Reading_3.mp3')
+    if (allow) {
+        playAudio('Audio/Interactivemode_1.mp3', 'Audio/PlayAudio_1.mp3')
     }
 }
 
@@ -71,12 +71,19 @@ function startBookListening(next) {
     lastClickTime = now;
 
     if (timeSinceLastClick < 300) {
-        console.log("double click");
-        console.log("end reading activity")
-        goToScreen("landingScreen")
-        stopAudio()
-        playAudio('Audio/Reading_6.mp3')
-        pywebview.api.setThreadStop()
+        if (next == true) {
+            // if double tapping the next button stop the book
+            console.log("double click on next");
+            console.log("end reading activity")
+            goToScreen("landingScreen")
+            stopAudio()
+            playAudio('Audio/Endingreadingearly_1.mp3')
+            pywebview.api.setThreadStop()
+        } else {
+            console.log("double click on prev")
+            pywebview.api.playPreviousAudio()
+            // if doubletapping the prev button
+        }
         // Double-click code here
     } else {
         setTimeout(() => {
@@ -180,13 +187,14 @@ if (nextPageBtn) {
 
         if (timeSinceLastClick < 300) {
             console.log("double click");
-            playAudio('Audio/New_Book_4.mp3')
+            playAudio('Audio/SavedBook_1.mp3')
             endBook()
             // Double-click code here
         } else {
             setTimeout(() => {
                 if (now === lastClickTime) {
                     console.log("single click");
+                    playAudio('Audio/StartingScan_1.mp3')
                     nextPage()
                     // Single-click code here
                 }
@@ -211,7 +219,7 @@ function goToScreen(screenId) {
 
 function newBook() {
     pywebview.api.newBook()
-    playAudio('Audio/New_Book_1.mp3')
+    playAudio('Audio/BookScanningPage_1.mp3')
 }
 
 function nextPage() {
@@ -224,12 +232,11 @@ function endBook() {
 
 function fetchBooks() {
     pywebview.api.fetchBooks()
-    playAudio('Audio/Library.mp3', 'books/Book.mp3')
+    playAudio('Audio/LibraryIntro_1.mp3', 'books/Book.mp3')
 }
 
 function createBookDivs(bookArray) {
     booksJS = bookArray
-    const bookList = document.getElementById('book-list');
     bookArray.forEach(book => {
         const div = document.createElement('div');
         div.className = 'book-div';
@@ -267,8 +274,20 @@ function showLoader() {
 
 let currentAudio2 = null;
 
+let instructionsButton = document.getElementById('playInstructionAgainBtn')
+instructionsButton.addEventListener("click", () => {
+    let audioIndicator = document.getElementById("audioIndicator")
+    audioIndicator.style = "display: block;"
+    currentAudio2.play().catch(error => {
+        console.log('Error playing audio:', error);
+    });
+})
+
+
 // Function to play audio
 function playAudio(path, scnd = undefined) {
+    let audioIndicator = document.getElementById("audioIndicator")
+    audioIndicator.style = "display: block;"
     stopAudio();  // Stop any currently playing audio
 
     currentAudio2 = new Audio(path);
@@ -282,6 +301,7 @@ function playAudio(path, scnd = undefined) {
     currentAudio2.addEventListener("ended", function () {
         currentAudio2.currentTime = 0;
         console.log("Audio ended");
+        audioIndicator.style = "display: none;"
         if (scnd != undefined) {
             playAudio(scnd)
         }

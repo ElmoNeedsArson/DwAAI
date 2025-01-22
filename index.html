@@ -6,9 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interactive Page</title>
     <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/audioplayer.css">
+    <link rel="stylesheet" href="css/instructionsBtn.css">
 </head>
 
 <body>
+    <div id="audioIndicator">
+        <div class="loader"></div>
+    </div>
+
+    <div id="playInstructionAgain">
+        <button id="playInstructionAgainBtn">Instructions</button>
+    </div>
+
     <div id="landingScreen" class="screen active">
         <button class="topBtn ripple-button" onclick="goToScreen('newBook'); newBook()">
             <div class="inner-circle top">

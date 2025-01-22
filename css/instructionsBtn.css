@@ -1,0 +1,9 @@
+#playInstructionAgain{
+    position: absolute;
+    right: 10px;
+    top: 10px;
+}
+
+#playInstructionAgainBtn{
+    padding: 5px;
+}
