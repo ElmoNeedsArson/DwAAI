@@ -67,7 +67,7 @@ class Api:
             self.py_cam2()
         self.activeBook = window.evaluate_js("fetchActiveBook()")
         print(f"this is the active book: {self.activeBook}")
-        window.evaluate_js(f"playAudio('Audio/PlayAudio_1.mp3')")
+        window.evaluate_js(f"playAudio('Audio/Interactivemode_1.mp3','Audio/PlayAudio_1.mp3')")
         window.evaluate_js(f"goToScreen('bookStart')")
 
     def playPreviousAudio(self):
@@ -713,6 +713,7 @@ class Api:
             # responseArr = list(filter(None, response.text.split('|')))
             responseArr = [item for item in response.text.strip().split('|') if item.strip()]
             print(responseArr)
+            window.evaluate_js(f"playAudio('Audio/Scanning_1.mp3')")
 
             if(response == None):
                 print("response is none")
