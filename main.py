@@ -802,4 +802,4 @@ if __name__ == '__main__':
     # final window - ENABLE FOR FINAL PRODUCT
     # window = webview.create_window('BlindConnection', 'index.html', js_api=api, width=400, height=700, resizable=False, frameless=True)
     
-    webview.start(debug=True)
+    webview.start()
